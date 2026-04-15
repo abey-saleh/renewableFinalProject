@@ -1,0 +1,921 @@
+%% ========================================================================
+%  FINAL PROJECT TEMPLATE
+%  ECEN 2410: Renewable Sources and Efficient Energy Systems
+%
+%  OVERVIEW
+%  1) Load SAM weather data and hourly residential demand
+%  2) Define PV system design parameters
+%  3) Compute PV power using your Homework 2 formulas
+%  4) Build hourly electricity prices for the full year
+%  5) For each forecasting model, pricing scheme, and season:
+%        - identify the target prediction week
+%        - at the beginning of each day, use the previous 7 days as history
+%        - generate a 24-hour weather forecast
+%        - compute 24-hour forecasted PV generation
+%        - schedule the battery for that day
+%        - evaluate the resulting cost
+%  6) Post-process and compare results
+%
+%  IMPORTANT:
+%  - Edit only the sections marked TODO.
+%  - Keep all helper functions in this single file.
+%  - The code must run as-is once all TODOs are completed.
+%% ========================================================================
+
+
+%% ========================================================================
+%  PREREQUISITE: CVX INSTALLATION (ONE-TIME SETUP)
+% ========================================================================
+%  Copy and paste these 4 lines into your MATLAB Command Window to install:
+%
+%  unzip('http://web.cvxr.com/cvx/cvx-rd.zip')
+%  cd cvx
+%  cvx_setup
+%  cd ..
+%
+%  EXPECTED INSTALLATION WARNINGS (THESE ARE OK):
+%  * "WARNING: missing files... \sedumi\.travis.yml"
+%  * "1 solver skipped: GLPK"
+%
+%  If the output ends with:
+%  "Testing with a simple model...done!"
+%  then CVX is installed correctly.
+%% ========================================================================
+
+
+%% ========================================================================
+%  1) LOAD WEATHER DATA (FROM SAM)
+%% ========================================================================
+weatherFile = 'Tuscon_weather_Real.csv';  % TODO: update if needed
+T = format_sam_weather(weatherFile);
+
+% Main weather variables
+t_solar = T.t_solar;
+GHI     = T.GHI;
+DNI     = T.DNI;
+DHI     = T.DHI;
+alb     = T.albedo;
+vwind   = T.wind;
+Tamb    = T.Tamb;
+
+N = height(T);
+dt_hr = 1;
+
+if N ~= 8760
+    warning('Expected 8760 hourly rows, but found N = %d.', N);
+end
+
+% Datetime vector for the year
+time = datetime(2024,1,1,0,0,0) + hours(0:N-1)';
+
+
+%% ========================================================================
+%  2) LOAD DEMAND DATA
+%% ========================================================================
+demandFile = 'tucson_residential_demand.csv';
+T_demand = readtable(demandFile);
+demand_year = T_demand.Demand_kW;
+
+if length(demand_year) ~= N
+    error('Weather and demand data must have the same number of hourly rows.');
+end
+
+
+%% ========================================================================
+%  3) PV SYSTEM DESIGN PARAMETERS
+%  Fill in the values below using the project constraints and your SAM data.
+%% ========================================================================
+
+% -------------------------
+% System / site parameters
+% -------------------------
+ phi      = 32.21;     % TODO: latitude [deg]
+ gamma_p  = 0;    % South-facing [deg]
+ beta_deg = 25;   % Roof tilt [deg]
+ kv       = 1.5;  % Thermal parameter [deg C per (m/s)]
+
+% -------------------------
+% Array layout (your design)
+% -------------------------
+ Ns = 5;           % TODO: modules in series
+ Np = 1;           % TODO: parallel strings
+
+% -------------------------
+% Module parameters (from SAM)
+% -------------------------
+ P_mod_STC = 345.161;    % TODO: module Pmp [W]
+ Vmp_STC   = 34.9;    % TODO: module Vmp [V]
+ NOCT      = 46.6;    % TODO: [deg C]
+ Vmp_Tcoef = -0.107;    % TODO: [V/deg C]
+ gammaT    = -0.362;    % TODO: [%/deg C]
+
+% -------------------------
+% Inverter parameters (from SAM)
+% -------------------------
+ Vdc_min = 158;      % TODO: mppt_low [V]
+ Vdc_max = 495;      % TODO: Vdcmax [V]
+ eta_inv = 0.95985;      % TODO: weighted efficiency [fraction]
+
+
+%% ========================================================================
+%  4) SOLAR GEOMETRY
+%  This block is provided.
+%% ========================================================================
+doy   = ceil((1:N)'/24);
+delta = 23.45 .* sind((360/365) .* (284 + doy));
+omega = 15 .* (t_solar - 12);
+
+cos_tz = sind(phi).*sind(delta) + cosd(phi).*cosd(delta).*cosd(omega);
+cos_tz = max(-1, min(1, cos_tz));
+daylight = cos_tz > 0;
+
+% Cosine of incidence angle for south-facing surface
+cos_ti = ...
+    sind(delta).*sind(phi).*cosd(beta_deg) ...
+  - sind(delta).*cosd(phi).*sind(beta_deg) ...
+  + cosd(delta).*cosd(phi).*cosd(beta_deg).*cosd(omega) ...
+  + cosd(delta).*sind(phi).*sind(beta_deg).*cosd(omega);
+
+
+%% ========================================================================
+%  5) PV DESIGN CALCULATIONS (TODO: REUSE YOUR HOMEWORK 2 CODE)
+%
+%  Use your Assignment 2 formulas to compute:
+%    - plane-of-array irradiance
+%    - cell temperature
+%    - temperature-adjusted voltage
+%    - total string voltage
+%    - hourly AC PV power for the full year
+%
+%  NOTE:
+%  Keep all power variables in kW.
+%  Since the time step is 1 hour, kW and kWh align directly in hourly costs.
+%% ========================================================================
+
+% -------------------------
+% TODO: plane-of-array irradiance
+% -------------------------
+% Example placeholder:
+% rho = alb
+% GPOA = DNI.max(0,cos_ti) + DHI.*(1+cosd(beta_deg))./2 + rho.*GHI.*(1-cosd(beta_deg))./2;
+GPOA(~daylight) = 0;
+
+% -------------------------
+% TODO: cell temperature
+% -------------------------
+% Example placeholder:
+% Tcell = Tamb + ((NOCT - 20)/800).*GPOA - kv.*vwind;
+% Tcell = max(Tcell, Tamb);
+% -------------------------
+% TODO: module/string voltage
+% -------------------------
+% Example placeholder:
+ Vmp_mod = Vmp_STC + Vmp_Tcoef.*(Tcell - 25);
+ Vmp_string = Ns * Vmp_mod;
+
+% -------------------------
+% TODO: yearly AC PV output [kW]
+% -------------------------
+% Example placeholder:
+% P_pv_year = PAC_raw_W ./ 1000;
+P_DC_achieved_W = Ns * Np * P_mod_STC;
+PDC_corr_W = P_DC_achieved_W .* (GPOA ./ 1000)
+PDC_corr_W(GPOA == 0) = 0;
+PDC_corr_W = max(PDC_corr_W, 0);
+PAC_raw_W = eta_inv .* PDC_corr_W;
+P_pv_year = PAC_raw_W ./ 1000;
+%
+% P_pv_year must be an [8760 x 1] vector with hourly AC generation.
+
+-----------------------------------
+%Eduardos Code
+
+
+%CLAUDES CODE
+
+
+% -------------------------
+% Plane-of-array irradiance
+% -------------------------
+rho = alb;  % Ground reflectance = albedo
+ 
+% Direct (beam) component on tilted surface
+G_beam_tilted = DNI .* max(0, cos_ti);
+ 
+% Diffuse (sky) component — isotropic model
+G_diff_tilted = DHI .* (1 + cosd(beta_deg)) / 2;
+ 
+% Ground-reflected component
+G_refl_tilted = GHI .* rho .* (1 - cosd(beta_deg)) / 2;
+ 
+% Total plane-of-array irradiance
+GPOA = G_beam_tilted + G_diff_tilted + G_refl_tilted;
+GPOA = max(0, GPOA);
+ 
+% -------------------------
+% Cell temperature
+% -------------------------
+% NOCT-based model: Tcell = Tamb + (NOCT - 20)/800 * GPOA - kv * vwind
+Tcell = Tamb + ((NOCT - 20) / 800) .* GPOA - kv .* vwind;
+ 
+% -------------------------
+% Module / string voltage
+% -------------------------
+Vmp_mod    = Vmp_STC + Vmp_Tcoef .* (Tcell - 25);
+Vmp_string = Ns .* Vmp_mod;
+ 
+% -------------------------
+% Yearly AC PV output [kW]
+% -------------------------
+% Temperature-corrected power factor
+P_dc_per_mod = (P_mod_STC / 1000) .* GPOA .* (1 + (gammaT/100) .* (Tcell - 25));  % [W -> kW factor applied below]
+% Convert W to kW and multiply by number of modules
+P_dc = Ns .* Np .* P_dc_per_mod / 1000;  % [kW]  (P_mod_STC is in W, GPOA in W/m^2 relative to 1000 W/m^2)
+ 
+% Zero out night hours
+P_dc(~daylight) = 0;
+P_dc = max(0, P_dc);
+ 
+% Apply inverter efficiency to get AC output
+P_pv_year = P_dc .* eta_inv;  % [kW]
+
+
+%% ========================================================================
+%  6) STRING VOLTAGE VALIDATION PLOT
+%  Do not edit once your formulas are working.
+%% ========================================================================
+figure('Name', 'String Voltage Validation', 'Color', 'w');
+plot(time, Vmp_string, 'b-', 'LineWidth', 1.0);
+hold on;
+yline(Vdc_max, 'r-', 'LineWidth', 2, 'DisplayName', 'Inverter Vdc_{max}');
+yline(Vdc_min, 'r-', 'LineWidth', 2, 'DisplayName', 'Inverter Vdc_{low}');
+grid on;
+title('String Voltage vs Inverter DC Limits over 1 Year');
+xlabel('Time');
+ylabel('Voltage [V]');
+legend('Vmp,string', 'Vdc,max', 'Vdc,min', 'Location', 'best');
+xlim([time(1) time(end)]);
+
+
+%% ========================================================================
+%  7) SIMULATION SETTINGS
+%% ========================================================================
+forecasters = {'persistence', 'moving_avg', 'linear'};
+schemes     = {'flat_rate', 'current_TOU', 'three_tier_TOU'};
+seasons     = {'summer', 'winter'};
+
+% Build hourly price vectors for the full year
+price_year = build_yearly_price_vectors(N);
+
+% Battery initial energy at the beginning of each day
+% Adjust only if your project assumptions differ.
+E_ini_default = 0.50 * 13.5;   % kWh
+
+
+%% ========================================================================
+%  8) RESULTS STRUCTURE
+%% ========================================================================
+Results = struct();
+
+for i = 1:length(forecasters)
+    for j = 1:length(schemes)
+        for k = 1:length(seasons)
+            Results.(forecasters{i}).(schemes{j}).(seasons{k}) = struct( ...
+                'daily_cost',        zeros(7,1), ...
+                'daily_cost_noPV',   zeros(7,1), ...
+                'daily_cost_PVonly', zeros(7,1), ...
+                'P_grid',            cell(7,1), ...
+                'P_ch',              cell(7,1), ...
+                'P_dis',             cell(7,1), ...
+                'E',                 cell(7,1), ...
+                'P_pv_forecast',     cell(7,1), ...
+                'P_pv_actual',       cell(7,1), ...
+                'P_demand',          cell(7,1), ...
+                'TOU_price',         cell(7,1), ...
+                'idx_day',           cell(7,1) );
+        end
+    end
+end
+
+
+%% ========================================================================
+%  9) MAIN DAY-AHEAD SIMULATION LOOP
+%
+%  For each:
+%    forecasting method
+%    pricing scheme
+%    season
+%
+%  do the following:
+%    - select the prediction week
+%    - for each day in that week:
+%         * use the PREVIOUS 7 DAYS as forecasting history
+%         * forecast the next 24 hours
+%         * compute forecasted PV
+%         * schedule battery using forecasted PV
+%         * evaluate electricity cost
+%% ========================================================================
+
+for i = 1:length(forecasters)
+    for j = 1:length(schemes)
+        for k = 1:length(seasons)
+
+            forecast_name = forecasters{i};
+            scheme_name   = schemes{j};
+            season_name   = seasons{k};
+
+            % ---------------------------------------------------------
+            % Select the prediction week
+            %
+            % Summer evaluation:
+            %   first week of July
+            %
+            % Winter evaluation:
+            %   first week of February
+            %
+            % For each day in the prediction week, the previous 168 hours
+            % are used as the historical input to the forecasting tool.
+            % This means:
+            %   - for July 1, the historical data comes from the last week
+            %     of June
+            %   - for February 1, the historical data comes from the last
+            %     week of January
+            % ---------------------------------------------------------
+            if strcmp(season_name, 'summer')
+                idx_pred_week = find(month(time) == 7 & day(time) <= 7);
+            elseif strcmp(season_name, 'winter')
+                idx_pred_week = find(month(time) == 2 & day(time) <= 7);
+            else
+                error('Unknown season.');
+            end
+
+            if length(idx_pred_week) ~= 168
+                error('Prediction week must contain exactly 168 hourly points.');
+            end
+
+            % ---------------------------------------------------------
+            % Day-ahead operation over 7 days
+            % ---------------------------------------------------------
+            for d = 1:7
+
+                % Current 24-hour operating day
+                idx_day = idx_pred_week((d-1)*24 + (1:24));
+
+                % Previous 168 hours = forecasting history
+                idx_hist = (idx_day(1)-168):(idx_day(1)-1);
+
+                % Safety check
+                if idx_hist(1) < 1
+                    error('Not enough historical data before day %d.', d);
+                end
+
+                % -----------------------------------------------------
+                % Historical weather data for the forecasting tool
+                % -----------------------------------------------------
+                % T_past7 = ; %TODO
+                T_past7 = table();
+                T_past7.GHI    = GHI(idx_hist);
+                T_past7.DNI    = DNI(idx_hist);
+                T_past7.DHI    = DHI(idx_hist);
+                T_past7.Tamb   = Tamb(idx_hist);
+                T_past7.albedo = alb(idx_hist);
+                T_past7.wind   = vwind(idx_hist);
+
+                % -----------------------------------------------------
+                % Generate 24-hour weather forecast
+                % -----------------------------------------------------
+                [GHI_f, DNI_f, DHI_f, Tamb_f, albedo_f, wind_f] = ...
+                    forecast_weather(T_past7, forecast_name);
+
+                % -----------------------------------------------------
+                % TODO: Compute forecasted PV generation for this day
+                %
+                % Reuse your Homework 2 code and your chosen PV design.
+                % This output must be a [24 x 1] AC power vector in kW.
+                %
+                % Suggested workflow:
+                %   1) Determine the 24 timestamps for idx_day
+                %   2) Compute solar geometry for those 24 hours
+                %   3) Compute GPOA from forecasted weather
+                %   4) Compute cell temperature
+                %   5) Compute PV DC/AC power
+                %
+                % Example placeholder:
+                % P_pv_forecast = ... ;
+                % -----------------------------------------------------
+                time_day  = time(idx_day);
+                doy_f     = day(time_day, 'dayofyear');
+                delta_f   = 23.45 .* sind((360/365) .* (284 + doy_f));
+ 
+                % t_solar for forecast hours: use actual solar time from weather data
+                t_solar_f = t_solar(idx_day);
+                omega_f   = 15 .* (t_solar_f - 12);
+ 
+                cos_tz_f = sind(phi).*sind(delta_f) + cosd(phi).*cosd(delta_f).*cosd(omega_f);
+                cos_tz_f = max(-1, min(1, cos_tz_f));
+                daylight_f = cos_tz_f > 0;
+ 
+                cos_ti_f = ...
+                    sind(delta_f).*sind(phi).*cosd(beta_deg) ...
+                  - sind(delta_f).*cosd(phi).*sind(beta_deg) ...
+                  + cosd(delta_f).*cosd(phi).*cosd(beta_deg).*cosd(omega_f) ...
+                  + cosd(delta_f).*sind(phi).*sind(beta_deg).*cosd(omega_f);
+ 
+                % 2) GPOA from forecasted weather
+                G_beam_f = DNI_f .* max(0, cos_ti_f);
+                G_diff_f = DHI_f .* (1 + cosd(beta_deg)) / 2;
+                G_refl_f = GHI_f .* albedo_f .* (1 - cosd(beta_deg)) / 2;
+                GPOA_f   = max(0, G_beam_f + G_diff_f + G_refl_f);
+ 
+                % 3) Cell temperature (forecasted)
+                Tcell_f = Tamb_f + ((NOCT - 20) / 800) .* GPOA_f - kv .* wind_f;
+ 
+                % 4) PV DC power (forecasted)
+                P_dc_f = Ns .* Np .* (P_mod_STC / 1000) .* GPOA_f .* ...
+                         (1 + (gammaT/100) .* (Tcell_f - 25)) / 1000;
+                P_dc_f(~daylight_f) = 0;
+                P_dc_f = max(0, P_dc_f);
+ 
+                % 5) AC PV forecast [kW]
+                P_pv_forecast = P_dc_f .* eta_inv;
+
+
+                % -----------------------------------------------------
+                % Actual PV generation for the same day
+                % -----------------------------------------------------
+                % TODO: extract or compute actual PV generation for idx_day
+                % -----------------------------------------------------
+                P_pv_actual = P_pv_year(idx_day);
+
+                % -----------------------------------------------------
+                % Demand and prices for the current operating day
+                % -----------------------------------------------------
+                P_demand  = demand_year(idx_day);
+                TOU_price = price_year.(scheme_name)(idx_day);
+
+                % -----------------------------------------------------
+                % Day-ahead battery scheduling
+                % -----------------------------------------------------
+                % E_ini  = initial battery energy is 50% of Emax 
+                % for day 1 and is equal to the energy of the last hour of
+                % the previous day for the rest of the days.
+                
+                 % Day 1: E_ini = 50% of Emax (set before the loop)
+                % Days 2-7: E_ini = final energy state of previous day
+                % (E_ini is updated at the end of this block each iteration)
+                % E_ini = ; % TODO: 
+                
+                E_ini = E(end);
+
+                [scheduled_cost, P_grid_sched, P_ch, P_dis, E] = ...
+                    optimize_battery(P_pv_forecast, P_demand, TOU_price, E_ini);
+
+                % -----------------------------------------------------
+                % TODO: Baseline cost calculations for No PV, PV only, PV +
+                % battery
+                % -----------------------------------------------------
+                 % No PV: draw everything from the grid
+                daily_cost_noPV = TOU_price' * P_demand;
+ 
+                % PV only (no battery): grid = max(0, demand - actual PV)
+                P_grid_PVonly   = max(0, P_demand - P_pv_actual);
+                daily_cost_PVonly = TOU_price' * P_grid_PVonly;
+ 
+                % PV + battery with actual (perfect foresight) PV —
+                % schedule was built on forecast; evaluate actual cost
+                % using the scheduled grid power but with actual PV:
+                %   P_grid_actual = P_demand - P_pv_actual + P_ch - P_dis
+                P_grid_actual   = max(0, P_demand - P_pv_actual + P_ch - P_dis);
+                daily_cost_actual = TOU_price' * P_grid_actual;
+
+
+                % -----------------------------------------------------
+                % Store results     
+                % -----------------------------------------------------
+                % Results.(forecast_name).(scheme_name).(season_name).daily_cost_sched(d)  = ; % TODO:
+                % Results.(forecast_name).(scheme_name).(season_name).daily_cost_actual(d) = ; % TODO:
+                % Results.(forecast_name).(scheme_name).(season_name).daily_cost_noPV(d)   = ; % TODO:
+                % Results.(forecast_name).(scheme_name).(season_name).daily_cost_PVonly(d) = ; % TODO:
+
+                Results.(forecast_name).(scheme_name).(season_name).P_grid{d}        = P_grid_sched;
+                Results.(forecast_name).(scheme_name).(season_name).P_ch{d}          = P_ch;
+                Results.(forecast_name).(scheme_name).(season_name).P_dis{d}         = P_dis;
+                Results.(forecast_name).(scheme_name).(season_name).E{d}             = E;
+                Results.(forecast_name).(scheme_name).(season_name).P_pv_forecast{d} = P_pv_forecast;
+                Results.(forecast_name).(scheme_name).(season_name).P_pv_actual{d}   = P_pv_actual;
+                Results.(forecast_name).(scheme_name).(season_name).P_demand{d}      = P_demand;
+                Results.(forecast_name).(scheme_name).(season_name).TOU_price{d}     = TOU_price;
+                Results.(forecast_name).(scheme_name).(season_name).idx_day{d}       = idx_day;
+
+            end
+        end
+    end
+end
+
+
+%% ========================================================================
+%  10) POST-PROCESSING / ANALYSIS
+%
+%  Use this section to build:
+%    - cost comparison tables
+%    - forecasting error metrics
+%    - battery operation plots
+%    - representative day figures
+%
+%  Comparisons:
+%    - no PV
+%    - PV only
+%    - PV + battery
+%    - different pricing schemes
+%    - different forecasting models
+%% ========================================================================
+
+% Example: total weekly cost for one case
+% total_cost = sum(Results.linear.current_TOU.summer.daily_cost);
+
+% TODO: add plots, tables, and forecasting error metrics here.
+ 
+fprintf('\n===== WEEKLY COST SUMMARY (PV + Battery, Scheduled Cost) =====\n');
+fprintf('%-14s  %-17s  %-10s  %-10s\n', 'Forecaster', 'Scheme', 'Summer $', 'Winter $');
+fprintf('%s\n', repmat('-', 1, 60));
+ 
+for i = 1:length(forecasters)
+    for j = 1:length(schemes)
+        cost_s = sum(Results.(forecasters{i}).(schemes{j}).summer.daily_cost);
+        cost_w = sum(Results.(forecasters{i}).(schemes{j}).winter.daily_cost);
+        fprintf('%-14s  %-17s  %8.2f    %8.2f\n', ...
+            forecasters{i}, schemes{j}, cost_s, cost_w);
+    end
+end
+ 
+% -------------------------
+% Cost comparison table: No PV vs PV only vs PV+Battery
+% (using linear forecaster as representative)
+% -------------------------
+fprintf('\n===== COST COMPARISON TABLE (linear forecaster) =====\n');
+fprintf('%-17s  %-8s  %-9s  %-9s  %-13s  %-13s\n', ...
+    'Scheme', 'Season', 'No PV $', 'PV only $', 'PV+Batt(fcst)$', 'PV+Batt(act)$');
+fprintf('%s\n', repmat('-', 1, 85));
+ 
+for j = 1:length(schemes)
+    for k = 1:length(seasons)
+        noPV   = sum(Results.linear.(schemes{j}).(seasons{k}).daily_cost_noPV);
+        pvOnly = sum(Results.linear.(schemes{j}).(seasons{k}).daily_cost_PVonly);
+        pvBatt = sum(Results.linear.(schemes{j}).(seasons{k}).daily_cost);
+        pvAct  = sum(Results.linear.(schemes{j}).(seasons{k}).daily_cost_actual);
+        fprintf('%-17s  %-8s  %7.2f    %7.2f      %7.2f         %7.2f\n', ...
+            schemes{j}, seasons{k}, noPV, pvOnly, pvBatt, pvAct);
+    end
+end
+ 
+% -------------------------
+% Forecasting error metrics (MAPE) — summer week, current_TOU scheme
+% -------------------------
+fprintf('\n===== FORECASTING ERROR (MAPE, summer week, current_TOU) =====\n');
+for i = 1:length(forecasters)
+    mape_vals = zeros(7,1);
+    for d = 1:7
+        actual   = Results.(forecasters{i}).current_TOU.summer.P_pv_actual{d};
+        forecast = Results.(forecasters{i}).current_TOU.summer.P_pv_forecast{d};
+        % Only evaluate during daylight hours (actual PV > 0.01 kW)
+        daylight_idx = actual > 0.01;
+        if any(daylight_idx)
+            mape_vals(d) = mean(abs((actual(daylight_idx) - forecast(daylight_idx)) ./ actual(daylight_idx))) * 100;
+        else
+            mape_vals(d) = NaN;
+        end
+    end
+    fprintf('  %-14s  MAPE = %.1f%%\n', forecasters{i}, nanmean(mape_vals));
+end
+ 
+fprintf('\n===== FORECASTING ERROR (MAPE, winter week, current_TOU) =====\n');
+for i = 1:length(forecasters)
+    mape_vals = zeros(7,1);
+    for d = 1:7
+        actual   = Results.(forecasters{i}).current_TOU.winter.P_pv_actual{d};
+        forecast = Results.(forecasters{i}).current_TOU.winter.P_pv_forecast{d};
+        daylight_idx = actual > 0.01;
+        if any(daylight_idx)
+            mape_vals(d) = mean(abs((actual(daylight_idx) - forecast(daylight_idx)) ./ actual(daylight_idx))) * 100;
+        else
+            mape_vals(d) = NaN;
+        end
+    end
+    fprintf('  %-14s  MAPE = %.1f%%\n', forecasters{i}, nanmean(mape_vals));
+end
+ 
+% -------------------------
+% Representative day plot: Summer Day 4, linear / current_TOU
+% -------------------------
+rep_fcst   = 'linear';
+rep_scheme = 'current_TOU';
+rep_day    = 4;
+ 
+figure('Name', 'Representative Day – Summer (linear, current_TOU)', 'Color', 'w');
+hours_ax = 1:24;
+ 
+subplot(3,1,1);
+hold on;
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).summer.P_pv_actual{rep_day},   'g-',  'LineWidth', 1.5, 'DisplayName', 'PV Actual');
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).summer.P_pv_forecast{rep_day}, 'g--', 'LineWidth', 1.5, 'DisplayName', 'PV Forecast');
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).summer.P_demand{rep_day},      'b-',  'LineWidth', 1.5, 'DisplayName', 'Demand');
+ylabel('Power [kW]'); title('PV Generation and Demand'); legend; grid on;
+ 
+subplot(3,1,2);
+hold on;
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).summer.P_ch{rep_day},   'r-',  'LineWidth', 1.5, 'DisplayName', 'Charging');
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).summer.P_dis{rep_day},  'b-',  'LineWidth', 1.5, 'DisplayName', 'Discharging');
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).summer.E{rep_day},      'k--', 'LineWidth', 1.5, 'DisplayName', 'SOC [kWh]');
+ylabel('Power [kW] / Energy [kWh]'); title('Battery Operation'); legend; grid on;
+ 
+subplot(3,1,3);
+yyaxis left;
+stairs(hours_ax, Results.(rep_fcst).(rep_scheme).summer.TOU_price{rep_day}, 'k-', 'LineWidth', 1.5);
+ylabel('Price [$/kWh]');
+yyaxis right;
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).summer.P_grid{rep_day}, 'm-', 'LineWidth', 1.5);
+ylabel('Grid import [kW]');
+title('Electricity Price and Grid Import'); xlabel('Hour of day'); grid on;
+ 
+% -------------------------
+% Representative day plot: Winter Day 4, linear / current_TOU
+% -------------------------
+figure('Name', 'Representative Day – Winter (linear, current_TOU)', 'Color', 'w');
+ 
+subplot(3,1,1);
+hold on;
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).winter.P_pv_actual{rep_day},   'g-',  'LineWidth', 1.5, 'DisplayName', 'PV Actual');
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).winter.P_pv_forecast{rep_day}, 'g--', 'LineWidth', 1.5, 'DisplayName', 'PV Forecast');
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).winter.P_demand{rep_day},      'b-',  'LineWidth', 1.5, 'DisplayName', 'Demand');
+ylabel('Power [kW]'); title('PV Generation and Demand'); legend; grid on;
+ 
+subplot(3,1,2);
+hold on;
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).winter.P_ch{rep_day},   'r-',  'LineWidth', 1.5, 'DisplayName', 'Charging');
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).winter.P_dis{rep_day},  'b-',  'LineWidth', 1.5, 'DisplayName', 'Discharging');
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).winter.E{rep_day},      'k--', 'LineWidth', 1.5, 'DisplayName', 'SOC [kWh]');
+ylabel('Power [kW] / Energy [kWh]'); title('Battery Operation'); legend; grid on;
+ 
+subplot(3,1,3);
+yyaxis left;
+stairs(hours_ax, Results.(rep_fcst).(rep_scheme).winter.TOU_price{rep_day}, 'k-', 'LineWidth', 1.5);
+ylabel('Price [$/kWh]');
+yyaxis right;
+plot(hours_ax, Results.(rep_fcst).(rep_scheme).winter.P_grid{rep_day}, 'm-', 'LineWidth', 1.5);
+ylabel('Grid import [kW]');
+title('Electricity Price and Grid Import'); xlabel('Hour of day'); grid on;
+ 
+% -------------------------
+% Forecasting comparison: all three models, summer week PV profile
+% -------------------------
+figure('Name', 'Forecasting Comparison – Summer Week', 'Color', 'w');
+colors = {'b', 'r', [0.5 0.5 0]};
+hold on;
+for i = 1:length(forecasters)
+    pv_fc_week = cell2mat(Results.(forecasters{i}).current_TOU.summer.P_pv_forecast);
+    plot(1:168, pv_fc_week, '-', 'Color', colors{i}, 'LineWidth', 1.2, 'DisplayName', forecasters{i});
+end
+pv_actual_week = cell2mat(Results.persistence.current_TOU.summer.P_pv_actual);
+plot(1:168, pv_actual_week, 'k-', 'LineWidth', 2, 'DisplayName', 'Actual');
+xlabel('Hour of week'); ylabel('PV Power [kW]');
+title('Forecasted vs Actual PV – Summer Week');
+legend; grid on;
+ 
+% -------------------------
+% Bar chart: weekly cost comparison across pricing schemes (summer)
+% -------------------------
+figure('Name', 'Weekly Cost Bar Chart – Summer', 'Color', 'w');
+cost_matrix_summer = zeros(3, 4);  % [forecasters x (noPV, PVonly, PVbatt_fcst, PVbatt_actual)]
+ 
+for i = 1:length(forecasters)
+    cost_matrix_summer(i,1) = sum(Results.(forecasters{i}).flat_rate.summer.daily_cost_noPV);
+    cost_matrix_summer(i,2) = sum(Results.(forecasters{i}).flat_rate.summer.daily_cost_PVonly);
+    cost_matrix_summer(i,3) = sum(Results.(forecasters{i}).flat_rate.summer.daily_cost);
+    cost_matrix_summer(i,4) = sum(Results.(forecasters{i}).flat_rate.summer.daily_cost_actual);
+end
+bar(cost_matrix_summer);
+set(gca, 'XTickLabel', forecasters);
+ylabel('Weekly Cost [$]');
+title('Summer Weekly Cost – Flat Rate');
+legend({'No PV', 'PV Only', 'PV+Batt (forecast)', 'PV+Batt (actual)'}, 'Location', 'best');
+grid on;
+ 
+fprintf('\nAll plots generated.\n');
+ 
+
+%% ========================================================================
+%  FUNCTIONS (BLACK BOX / HELPER FUNCTIONS)
+%  Keep these in the same file.
+%% ========================================================================
+
+function T_clean = format_sam_weather(filename)
+%FORMAT_SAM_WEATHER Read and clean SAM weather data exported from NREL/SAM.
+
+    opts = detectImportOptions(filename);
+    opts.DataLines = [4, Inf];
+    opts.VariableNamesLine = 3;
+
+    T_raw = readtable(filename, opts);
+
+    T_clean = table();
+    T_clean.t_solar = T_raw.Hour + (T_raw.Minute / 60);
+    T_clean.DNI     = T_raw.DNI;
+    T_clean.DHI     = T_raw.DHI;
+    T_clean.GHI     = T_raw.GHI;
+    T_clean.Tamb    = T_raw.Temperature;
+    T_clean.albedo  = T_raw.SurfaceAlbedo;
+    T_clean.wind    = T_raw.WindSpeed;
+end
+
+
+function [GHI_f, DNI_f, DHI_f, Tamb_f, albedo_f, wind_f] = forecast_weather(T_past7, method)
+%FORECAST_WEATHER Predict the next 24 hours from the previous 7 days.
+%
+% Inputs:
+%   T_past7 : table with 168 rows and columns
+%             GHI, DNI, DHI, Tamb, albedo, wind
+%   method  : 'persistence', 'moving_avg', or 'linear'
+%
+% Outputs:
+%   Each output is a [24 x 1] forecast vector.
+
+    variables = {'GHI', 'DNI', 'DHI', 'Tamb', 'albedo', 'wind'};
+    results = cell(1, 6);
+
+    for i = 1:6
+        var_name = variables{i};
+        data = T_past7.(var_name);
+        data_fcst = zeros(24, 1);
+
+        if strcmp(method, 'persistence')
+            data_fcst = data(145:168);
+
+        elseif strcmp(method, 'moving_avg')
+            d1 = data(145:168);
+            d2 = data(121:144);
+            d3 = data(97:120);
+            data_fcst = (d1 + d2 + d3) / 3;
+
+        elseif strcmp(method, 'linear')
+            x_days = (1:7)';
+            x_target = 8;
+
+            for h = 1:24
+                idx_h = h:24:168;
+                p = polyfit(x_days, data(idx_h), 1);
+                data_fcst(h) = polyval(p, x_target);
+            end
+
+            if ~strcmp(var_name, 'Tamb')
+                data_fcst = max(0, data_fcst);
+            end
+
+        else
+            error('Method not valid. Use: persistence, moving_avg, or linear');
+        end
+
+        results{i} = data_fcst;
+    end
+
+    GHI_f    = results{1};
+    DNI_f    = results{2};
+    DHI_f    = results{3};
+    Tamb_f   = results{4};
+    albedo_f = results{5};
+    wind_f   = results{6};
+end
+
+
+function [scheduled_cost, P_grid_sched, P_ch, P_dis, E] = optimize_battery(P_pv, P_demand, TOU_price, E_ini)
+%OPTIMIZE_BATTERY Compute the optimal 24-hour battery schedule.
+%
+% Inputs:
+%   P_pv      : [24 x 1] forecasted PV generation [kW]
+%   P_demand  : [24 x 1] demand [kW]
+%   TOU_price : [24 x 1] electricity price [$/kWh]
+%   E_ini     : initial battery energy [kWh]
+%
+% Outputs:
+%   scheduled_cost : daily electricity cost [$]
+%   P_grid         : [24 x 1] grid import [kW]
+%   P_ch           : [24 x 1] battery charging power [kW]
+%   P_dis          : [24 x 1] battery discharging power [kW]
+%   E              : [24 x 1] battery energy [kWh]
+
+    % Battery parameters
+    E_max    = 13.5;           % kWh
+    P_max    = 4.5;            % kW
+    E_min    = 0.20 * E_max;   % kWh
+    E_target = 0.50 * E_max;   % kWh
+    RTE      = 0.95;
+
+    eta_c = sqrt(RTE);
+    eta_d = sqrt(RTE);
+
+    N = 24;
+
+    if length(P_pv) ~= N || length(P_demand) ~= N || length(TOU_price) ~= N
+        error('P_pv, P_demand, and TOU_price must each contain 24 entries.');
+    end
+
+    P_pv      = P_pv(:);
+    P_demand  = P_demand(:);
+    TOU_price = TOU_price(:);
+
+    cvx_begin quiet
+        variables P_grid(N) P_ch(N) P_dis(N) E(N)
+
+        minimize(TOU_price' * P_grid)
+
+        subject to
+            % Power balance
+            P_grid == P_demand - P_pv + P_ch - P_dis;
+
+            % No selling back to the grid
+            P_grid >= 0;
+
+            % Power limits
+            0 <= P_ch  <= P_max;
+            0 <= P_dis <= P_max;
+
+            % Energy limits
+            E_min <= E <= E_max;
+
+            % Energy dynamics
+            E(1) == E_ini + eta_c * P_ch(1) - (1 / eta_d) * P_dis(1);
+
+            for t = 2:N
+                E(t) == E(t-1) + eta_c * P_ch(t) - (1 / eta_d) * P_dis(t);
+            end
+
+            % End-of-day minimum energy
+            E(N) >= E_target;
+    cvx_end
+
+    scheduled_cost = cvx_optval;
+end
+
+
+function price_year = build_yearly_price_vectors(N)
+%BUILD_YEARLY_PRICE_VECTORS Generate full-year hourly prices for each tariff.
+
+    prices = struct();
+
+    % Flat rate
+    prices.flat_rate.summer = 0.14 * ones(24,1);
+    prices.flat_rate.winter = 0.14 * ones(24,1);
+
+    % Current TOU
+    prices.current_TOU.summer = [ ...
+        0.11*ones(17,1);
+        0.28*ones(4,1);
+        0.11*ones(3,1)
+    ];
+
+    prices.current_TOU.winter = [ ...
+        0.10*ones(17,1);
+        0.22*ones(4,1);
+        0.10*ones(3,1)
+    ];
+
+    % Three-tier TOU: summer
+    prices.three_tier_TOU.summer = [ ...
+        0.10*ones(9,1);
+        0.15*ones(5,1);
+        0.25*ones(4,1);
+        0.15*ones(3,1);
+        0.10*ones(3,1)
+    ];
+
+    % Three-tier TOU: winter
+    prices.three_tier_TOU.winter = [ ...
+        0.09*ones(9,1);
+        0.13*ones(8,1);
+        0.20*ones(2,1);
+        0.13*ones(2,1);
+        0.09*ones(3,1)
+    ];
+
+    time = datetime(2024,1,1,0,0,0) + hours(0:N-1)';
+    schemes = {'flat_rate','current_TOU','three_tier_TOU'};
+
+    price_year = struct();
+    for j = 1:length(schemes)
+        price_year.(schemes{j}) = zeros(N,1);
+    end
+
+    for t = 1:N
+        if month(time(t)) >= 6 && month(time(t)) <= 9
+            season_name = 'summer';
+        else
+            season_name = 'winter';
+        end
+
+        h = hour(time(t)) + 1;
+
+        for j = 1:length(schemes)
+            scheme_name = schemes{j};
+            price_year.(scheme_name)(t) = prices.(scheme_name).(season_name)(h);
+        end
+    end
+end
