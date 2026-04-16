@@ -188,12 +188,6 @@ cos_ti = ...
 %
 % P_pv_year must be an [8760 x 1] vector with hourly AC generation.
 
-%Eduardos Code
-
-
-%CLAUDES CODE
-
-
 % -------------------------
 % Plane-of-array irradiance
 % -------------------------
