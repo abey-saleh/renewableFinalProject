@@ -98,7 +98,7 @@ end
 % -------------------------
 % Array layout (your design)
 % -------------------------
- Ns = 5;           % TODO: modules in series
+ Ns = 8;           % TODO: modules in series
  Np = 1;           % TODO: parallel strings
 
 % -------------------------
@@ -113,9 +113,9 @@ end
 % -------------------------
 % Inverter parameters (from SAM)
 % -------------------------
- Vdc_min = 158;      % TODO: mppt_low [V]
- Vdc_max = 495;      % TODO: Vdcmax [V]
- eta_inv = 0.95985;      % TODO: weighted efficiency [fraction]
+ Vdc_min = 100;      % TODO: mppt_low [V]
+ Vdc_max = 480;      % TODO: Vdcmax [V]
+ eta_inv = 0.97384;      % TODO: weighted efficiency [fraction]
 
 
 %% ========================================================================
