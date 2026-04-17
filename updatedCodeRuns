@@ -47,7 +47,7 @@ clear; close all; clc;
 %% ========================================================================
 %  1) LOAD WEATHER DATA (FROM SAM)
 %% ========================================================================
-weatherFile = 'Tuscon_weather_Real.csv';  % TODO: update if needed
+weatherFile = 'tucson_hourly.csv';  % TODO: update if needed
 T = format_sam_weather(weatherFile);
 
 % Main weather variables
