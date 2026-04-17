@@ -529,9 +529,9 @@ for i = 1:length(forecasters)
 end
  
 % -------------------------
-% Cost comparison table: No PV vs PV only vs PV+Battery
-% (using linear forecaster as representative)
+% Cost comparison table No PV vs PV only vs PV+Battery
 % -------------------------
+
 fprintf('\n===== COST COMPARISON TABLE (linear forecaster) =====\n');
 fprintf('%-17s  %-8s  %-9s  %-9s  %-13s  %-13s\n', ...
     'Scheme', 'Season', 'No PV $', 'PV only $', 'PV+Batt(fcst)$', 'PV+Batt(act)$');
@@ -549,8 +549,9 @@ for j = 1:length(schemes)
 end
  
 % -------------------------
-% Forecasting error metrics (MAPE) — summer week, current_TOU scheme
+% Forecasting error metrics (MAPE)
 % -------------------------
+
 fprintf('\n===== FORECASTING ERROR (MAPE, summer week, current_TOU) =====\n');
 for i = 1:length(forecasters)
     mape_vals = zeros(7,1);
@@ -707,15 +708,14 @@ function T_clean = format_sam_weather(filename)
     T_clean.wind    = T_raw.WindSpeed;
 end
 
-
 function [GHI_f, DNI_f, DHI_f, Tamb_f, albedo_f, wind_f] = forecast_weather(T_past7, method)
-%FORECAST_WEATHER Predict the next 24 hours from the previous 7 days.
-%
+%FORECAST_WEATHER Predict the next 24 hours from the last 7 days.
+
 % Inputs:
 %   T_past7 : table with 168 rows and columns
 %             GHI, DNI, DHI, Tamb, albedo, wind
 %   method  : 'persistence', 'moving_avg', or 'linear'
-%
+
 % Outputs:
 %   Each output is a [24 x 1] forecast vector.
 
@@ -751,7 +751,7 @@ function [GHI_f, DNI_f, DHI_f, Tamb_f, albedo_f, wind_f] = forecast_weather(T_pa
             end
 
         else
-            error('Method not valid. Use: persistence, moving_avg, or linear');
+            error(' not valid. use persistence, moving_avg, or linear');
         end
 
         results{i} = data_fcst;
