@@ -46,7 +46,7 @@
 %% ========================================================================
 %  1) LOAD WEATHER DATA (FROM SAM)
 %% ========================================================================
-weatherFile = 'tuscon_hourly';  % TODO: update if needed
+weatherFile = 'tucson_hourly';  % TODO: update if needed
 T = format_sam_weather(weatherFile);
 
 % Main weather variables
